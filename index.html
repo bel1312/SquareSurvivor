@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vampire Survivor</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="game-container">
+      <div class="ui-overlay">
+        <div class="stats">
+          <div class="health-bar">
+            <div class="health-fill"></div>
+            <span class="health-text">100/100</span>
+          </div>
+          <div class="score">Score: <span id="score">0</span></div>
+          <div class="level">Level: <span id="level">1</span></div>
+          <div class="time">Time: <span id="time">0:00</span></div>
+        </div>
+
+        <div class="upgrade-menu hidden" id="upgradeMenu">
+          <h2>Level Up!</h2>
+          <div class="upgrade-options" id="upgradeOptions">
+            <!-- Upgrade options will be generated here -->
+          </div>
+        </div>
+
+        <div class="game-over hidden" id="gameOver">
+          <h2>Game Over!</h2>
+          <p>Final Score: <span id="finalScore">0</span></p>
+          <p>Time Survived: <span id="finalTime">0:00</span></p>
+          <button onclick="restartGame()">Play Again</button>
+        </div>
+      </div>
+
+      <canvas id="gameCanvas" width="1200" height="800"></canvas>
+    </div>
+
+    <div class="controls">
+      <p>Use WASD or Arrow Keys to move</p>
+      <p>Survive as long as possible!</p>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
