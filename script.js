@@ -585,7 +585,7 @@ function spawnEnemies(deltaTime) {
       y: y,
       size: 15,
       speed: 50 + Math.random() * 30 + gameState.time * 2,
-      health: 1,
+      health: 15,
       damage: 10,
       color: "#ff4444",
     });
