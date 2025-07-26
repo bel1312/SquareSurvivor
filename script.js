@@ -15,51 +15,10 @@ let gameState = {
 
 // Audio system
 const audioSystem = {
-  musicEnabled: true,
   soundEnabled: true,
-  bgMusic: null,
-  sounds: {},
   
   init() {
-    this.bgMusic = document.getElementById('bgMusic');
-    this.sounds.shoot = document.getElementById('shootSound');
-    this.sounds.hit = document.getElementById('hitSound');
-    this.sounds.levelUp = document.getElementById('levelUpSound');
-    this.sounds.damage = document.getElementById('damageSound');
-    
-    // Create procedural audio
-    this.createProceduralAudio();
-  },
-  
-  createProceduralAudio() {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    
-    // Create background music
-    this.createBackgroundMusic(audioContext);
-    
-    // Create sound effects
-    this.createSoundEffects(audioContext);
-  },
-  
-  createBackgroundMusic(ctx) {
-    // Simple ambient background music
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    
-    oscillator.frequency.setValueAtTime(220, ctx.currentTime);
-    oscillator.type = 'sine';
-    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-    
-    if (this.musicEnabled) {
-      oscillator.start();
-    }
-  },
-  
-  createSoundEffects(ctx) {
-    // Sound effects will be created procedurally when needed
+    // Audio system initialized
   },
   
   playSound(soundName) {
@@ -74,11 +33,8 @@ const audioSystem = {
       case 'hit':
         this.createHitSound(audioContext);
         break;
-      case 'damage':
-        this.createDamageSound(audioContext);
-        break;
-      case 'levelUp':
-        this.createLevelUpSound(audioContext);
+      case 'destroy':
+        this.createDestroySound(audioContext);
         break;
     }
   },
@@ -118,39 +74,24 @@ const audioSystem = {
     oscillator.stop(ctx.currentTime + 0.2);
   },
   
-  createDamageSound(ctx) {
+
+  
+  createDestroySound(ctx) {
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
     
     oscillator.connect(gainNode);
     gainNode.connect(ctx.destination);
     
-    oscillator.frequency.setValueAtTime(100, ctx.currentTime);
+    oscillator.frequency.setValueAtTime(300, ctx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.4);
     oscillator.type = 'sawtooth';
     
     gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
     
     oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.3);
-  },
-  
-  createLevelUpSound(ctx) {
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    
-    oscillator.frequency.setValueAtTime(400, ctx.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.3);
-    oscillator.type = 'sine';
-    
-    gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-    
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.3);
+    oscillator.stop(ctx.currentTime + 0.4);
   }
 };
 
@@ -171,6 +112,7 @@ const player = {
 let enemies = [];
 let projectiles = [];
 let pickups = [];
+let xpOrbs = [];
 let particles = [];
 
 // Input handling
@@ -274,6 +216,7 @@ function startGame() {
   enemies = [];
   projectiles = [];
   pickups = [];
+  xpOrbs = [];
   particles = [];
 
   // Hide main menu
@@ -370,6 +313,9 @@ function update(deltaTime) {
 
   // Update projectiles
   updateProjectiles(deltaTime);
+
+  // Update XP orbs
+  updateXPOrbs(deltaTime);
 
   // Update particles
   updateParticles(deltaTime);
@@ -487,8 +433,7 @@ function updateEnemies(deltaTime) {
       // Remove enemy
       enemies.splice(index, 1);
 
-      // Play damage sound and create screen shake
-      audioSystem.playSound('damage');
+      // Create screen shake
       createScreenShake();
 
       // Create damage particles
@@ -585,7 +530,7 @@ function spawnEnemies(deltaTime) {
       y: y,
       size: 15,
       speed: 50 + Math.random() * 30 + gameState.time * 2,
-      health: 15,
+      health: 25,
       damage: 10,
       color: "#ff4444",
     });
@@ -620,8 +565,13 @@ function checkCollisions() {
         if (enemy.health <= 0) {
           enemies.splice(eIndex, 1);
           gameState.score += 10;
-          player.experience += 15;
 
+          // Play destroy sound
+          audioSystem.playSound('destroy');
+          
+          // Drop XP orb
+          createXPOrb(enemy.x, enemy.y, 15);
+          
           // Create death particles and explosion
           createParticles(enemy.x, enemy.y, "#ff0000", 12);
           createExplosion(enemy.x, enemy.y);
@@ -762,8 +712,7 @@ function checkLevelUp() {
     gameState.level++;
     player.experienceToNext = Math.floor(player.experienceToNext * 1.2);
 
-    // Play level up sound
-    audioSystem.playSound('levelUp');
+    // Level up (no sound)
     
     // Create level up effect
     createLevelUpEffect();
@@ -877,49 +826,145 @@ function restartGame() {
   init();
 }
 
+// Background stars array
+let backgroundStars = [];
+
+// Initialize background stars
+function initBackgroundStars() {
+  for (let i = 0; i < 100; i++) {
+    backgroundStars.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      size: Math.random() * 2 + 0.5,
+      speed: Math.random() * 0.5 + 0.1,
+      brightness: Math.random()
+    });
+  }
+}
+
+// Update background stars
+function updateBackgroundStars() {
+  backgroundStars.forEach(star => {
+    star.brightness += (Math.random() - 0.5) * 0.02;
+    star.brightness = Math.max(0.1, Math.min(1, star.brightness));
+  });
+}
+
 // Render game
 function render() {
-  // Clear canvas with animated background
-  const gradient = ctx.createRadialGradient(
-    canvas.width / 2, canvas.height / 2, 0,
-    canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height) / 2
+  // Initialize stars if not done
+  if (backgroundStars.length === 0) initBackgroundStars();
+  updateBackgroundStars();
+  // Clear canvas with dynamic background
+  const time = Date.now() * 0.001;
+  
+  // Multi-layer gradient background
+  const gradient1 = ctx.createRadialGradient(
+    canvas.width * 0.3, canvas.height * 0.3, 0,
+    canvas.width * 0.3, canvas.height * 0.3, 400
+  );
+  const gradient2 = ctx.createRadialGradient(
+    canvas.width * 0.7, canvas.height * 0.7, 0,
+    canvas.width * 0.7, canvas.height * 0.7, 400
   );
   
-  const time = Date.now() * 0.001;
-  const r1 = Math.sin(time * 0.5) * 0.1 + 0.1;
-  const g1 = Math.sin(time * 0.3) * 0.1 + 0.1;
-  const b1 = Math.sin(time * 0.7) * 0.1 + 0.2;
+  // Pulsing colors
+  const r1 = Math.sin(time * 0.8) * 0.15 + 0.15;
+  const g1 = Math.sin(time * 0.6) * 0.1 + 0.1;
+  const b1 = Math.sin(time * 1.2) * 0.2 + 0.25;
   
-  gradient.addColorStop(0, `rgb(${Math.floor(r1 * 255)}, ${Math.floor(g1 * 255)}, ${Math.floor(b1 * 255)})`);
-  gradient.addColorStop(1, '#0a0a1a');
+  const r2 = Math.sin(time * 0.7 + Math.PI) * 0.1 + 0.1;
+  const g2 = Math.sin(time * 0.9 + Math.PI) * 0.15 + 0.15;
+  const b2 = Math.sin(time * 0.5 + Math.PI) * 0.1 + 0.2;
   
-  ctx.fillStyle = gradient;
+  gradient1.addColorStop(0, `rgba(${Math.floor(r1 * 255)}, ${Math.floor(g1 * 255)}, ${Math.floor(b1 * 255)}, 0.8)`);
+  gradient1.addColorStop(1, 'rgba(10, 10, 26, 0)');
+  
+  gradient2.addColorStop(0, `rgba(${Math.floor(r2 * 255)}, ${Math.floor(g2 * 255)}, ${Math.floor(b2 * 255)}, 0.6)`);
+  gradient2.addColorStop(1, 'rgba(10, 10, 26, 0)');
+  
+  // Base dark background
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Apply gradients
+  ctx.fillStyle = gradient1;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = gradient2;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw animated grid pattern
+  // Draw dynamic background elements
+  
+  // Floating orbs
+  for (let i = 0; i < 8; i++) {
+    const orbTime = time + i * 0.5;
+    const x = canvas.width * 0.5 + Math.sin(orbTime * 0.3 + i) * 300;
+    const y = canvas.height * 0.5 + Math.cos(orbTime * 0.4 + i) * 200;
+    const size = 20 + Math.sin(orbTime * 2) * 10;
+    
+    ctx.save();
+    ctx.globalAlpha = 0.1 + Math.sin(orbTime * 1.5) * 0.05;
+    ctx.fillStyle = `hsl(${(i * 45 + time * 20) % 360}, 70%, 50%)`;
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 20;
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  
+  // Energy waves
+  for (let i = 0; i < 3; i++) {
+    const waveTime = time * 0.5 + i * 2;
+    const radius = (waveTime % 4) * 200;
+    
+    ctx.save();
+    ctx.globalAlpha = 0.15 * (1 - (waveTime % 4) / 4);
+    ctx.strokeStyle = `hsl(${180 + i * 60}, 60%, 40%)`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  
+  // Animated grid with hexagonal pattern
   ctx.strokeStyle = "#2a2a4a";
   ctx.lineWidth = 1;
-  const gridOffset = (Date.now() * 0.02) % 50;
+  const gridOffset = (time * 20) % 60;
   
-  for (let x = -gridOffset; x < canvas.width + 50; x += 50) {
-    ctx.save();
-    ctx.globalAlpha = 0.3 + Math.sin((x + Date.now() * 0.001) * 0.01) * 0.2;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
-    ctx.stroke();
-    ctx.restore();
-  }
-  for (let y = -gridOffset; y < canvas.height + 50; y += 50) {
-    ctx.save();
-    ctx.globalAlpha = 0.3 + Math.sin((y + Date.now() * 0.001) * 0.01) * 0.2;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
-    ctx.stroke();
-    ctx.restore();
+  for (let x = -gridOffset; x < canvas.width + 60; x += 60) {
+    for (let y = -gridOffset; y < canvas.height + 60; y += 60) {
+      ctx.save();
+      ctx.globalAlpha = 0.2 + Math.sin((x + y + time * 50) * 0.01) * 0.1;
+      ctx.translate(x, y);
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * Math.PI) / 3;
+        const px = Math.cos(angle) * 15;
+        const py = Math.sin(angle) * 15;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
+  // Draw twinkling stars
+  backgroundStars.forEach(star => {
+    ctx.save();
+    ctx.globalAlpha = star.brightness * 0.8;
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = star.size * 2;
+    ctx.beginPath();
+    ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+  
   // Draw particles
   particles.forEach((particle) => {
     ctx.save();
@@ -1033,6 +1078,24 @@ function render() {
   
   ctx.restore();
 
+  // Draw XP orbs
+  xpOrbs.forEach((orb) => {
+    ctx.save();
+    ctx.fillStyle = '#00ff00';
+    ctx.shadowColor = '#00ff00';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(orb.x, orb.y, orb.size, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Draw inner glow
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(orb.x, orb.y, orb.size * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+
   // Draw experience bar
   const expBarWidth = 300;
   const expBarHeight = 8;
@@ -1055,6 +1118,43 @@ function render() {
 window.addEventListener("load", () => {
   init();
 });
+
+// Create XP orb
+function createXPOrb(x, y, xpValue) {
+  xpOrbs.push({
+    x: x + (Math.random() - 0.5) * 20,
+    y: y + (Math.random() - 0.5) * 20,
+    xp: xpValue,
+    size: 8,
+    color: '#00ff00',
+    life: 30
+  });
+}
+
+// Update XP orbs
+function updateXPOrbs(deltaTime) {
+  xpOrbs.forEach((orb, index) => {
+    orb.life -= deltaTime;
+    
+    // Check if player collected orb
+    const distance = Math.sqrt(
+      Math.pow(orb.x - player.x, 2) + Math.pow(orb.y - player.y, 2)
+    );
+    
+    if (distance < orb.size + player.width / 2) {
+      player.experience += orb.xp;
+      xpOrbs.splice(index, 1);
+      
+      // Create collection effect
+      createParticles(orb.x, orb.y, '#00ff00', 3);
+    }
+    
+    // Remove expired orbs
+    if (orb.life <= 0) {
+      xpOrbs.splice(index, 1);
+    }
+  });
+}
 
 // Prevent context menu on right click
 document.addEventListener('contextmenu', e => e.preventDefault());
