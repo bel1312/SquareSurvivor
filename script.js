@@ -101,7 +101,7 @@ const player = {
   y: canvas.height / 2,
   width: 20,
   height: 20,
-  speed: 200,
+  speed: 250,
   health: 100,
   maxHealth: 100,
   experience: 0,
@@ -271,12 +271,9 @@ function toggleSound() {
 
 // Update audio status display
 function updateAudioStatus() {
-  const musicStatus = audioSystem.musicEnabled ? 'ON' : 'OFF';
   const soundStatus = audioSystem.soundEnabled ? 'ON' : 'OFF';
   
-  document.getElementById('musicStatus').textContent = musicStatus;
   document.getElementById('soundStatus').textContent = soundStatus;
-  document.getElementById('musicStatusMain').textContent = musicStatus;
   document.getElementById('soundStatusMain').textContent = soundStatus;
 }
 
@@ -499,7 +496,7 @@ function updateParticles(deltaTime) {
 // Spawn enemies
 function spawnEnemies(deltaTime) {
   // Increase spawn rate over time
-  const spawnRate = Math.min(0.5 + gameState.time * 0.01, 3);
+  const spawnRate = Math.min(0.5 + gameState.time * 0.015, 2.5);
 
   if (Math.random() < spawnRate * deltaTime) {
     // Choose spawn side
@@ -525,16 +522,93 @@ function spawnEnemies(deltaTime) {
         break;
     }
 
+    // Enemy types with different stats
+    const enemyTypes = [
+      { size: 12, speed: 80, health: 15, damage: 8, color: "#ff8844", xp: 12 }, // Fast
+      { size: 15, speed: 60, health: 20, damage: 12, color: "#ff4444", xp: 15 }, // Normal
+      { size: 18, speed: 40, health: 30, damage: 15, color: "#8844ff", xp: 20 }, // Tank
+      { size: 14, speed: 70, health: 18, damage: 10, color: "#44ff88", xp: 18 }  // Shooter
+    ];
+    
+    const type = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+    
     enemies.push({
       x: x,
       y: y,
-      size: 15,
-      speed: 50 + Math.random() * 30 + gameState.time * 2,
-      health: 25,
-      damage: 10,
-      color: "#ff4444",
+      size: type.size,
+      speed: type.speed + Math.random() * 20 + gameState.time * 1.5,
+      health: type.health,
+      maxHealth: type.health,
+      damage: type.damage,
+      color: type.color,
+      xp: type.xp,
+      isBoss: false
     });
   }
+  
+  // Spawn mini-boss every 45 seconds
+  if (gameState.time > 0 && gameState.time % 45 === 0 && Math.random() < 0.6) {
+    spawnMiniBoss();
+    console.log(`Mini-boss spawned at ${gameState.time}s!`);
+  }
+  
+  // Spawn boss every 120 seconds
+  if (gameState.time > 0 && gameState.time % 120 === 0 && Math.random() < 0.8) {
+    spawnBoss();
+    console.log(`Boss spawned at ${gameState.time}s!`);
+  }
+}
+
+// Spawn mini-boss
+function spawnMiniBoss() {
+  const side = Math.floor(Math.random() * 4);
+  let x, y;
+
+  switch (side) {
+    case 0: x = Math.random() * canvas.width; y = -30; break;
+    case 1: x = canvas.width + 30; y = Math.random() * canvas.height; break;
+    case 2: x = Math.random() * canvas.width; y = canvas.height + 30; break;
+    case 3: x = -30; y = Math.random() * canvas.height; break;
+  }
+
+  enemies.push({
+    x: x, y: y,
+    size: 25,
+    speed: 35,
+    health: 80,
+    maxHealth: 80,
+    damage: 20,
+    color: "#ff0088",
+    xp: 80,
+    isBoss: true,
+    isMiniBoss: true
+  });
+}
+
+// Spawn boss
+function spawnBoss() {
+  const side = Math.floor(Math.random() * 4);
+  let x, y;
+
+  switch (side) {
+    case 0: x = Math.random() * canvas.width; y = -40; break;
+    case 1: x = canvas.width + 40; y = Math.random() * canvas.height; break;
+    case 2: x = Math.random() * canvas.width; y = canvas.height + 40; break;
+    case 3: x = -40; y = Math.random() * canvas.height; break;
+  }
+
+  enemies.push({
+    x: x, y: y,
+    size: 35,
+    speed: 25,
+    health: 150,
+    maxHealth: 150,
+    damage: 30,
+    color: "#ff0000",
+    xp: 200,
+    isBoss: true,
+    isMiniBoss: false
+  });
 }
 
 // Check collisions
@@ -564,16 +638,17 @@ function checkCollisions() {
         // Remove enemy if dead
         if (enemy.health <= 0) {
           enemies.splice(eIndex, 1);
-          gameState.score += 10;
+          gameState.score += enemy.isBoss ? (enemy.isMiniBoss ? 50 : 100) : 10;
 
           // Play destroy sound
           audioSystem.playSound('destroy');
           
           // Drop XP orb
-          createXPOrb(enemy.x, enemy.y, 15);
+          createXPOrb(enemy.x, enemy.y, enemy.xp || 15);
           
           // Create death particles and explosion
-          createParticles(enemy.x, enemy.y, "#ff0000", 12);
+          const particleCount = enemy.isBoss ? (enemy.isMiniBoss ? 20 : 30) : 12;
+          createParticles(enemy.x, enemy.y, "#ff0000", particleCount);
           createExplosion(enemy.x, enemy.y);
         }
       }
@@ -989,9 +1064,14 @@ function render() {
   enemies.forEach((enemy) => {
     ctx.save();
     
-    // Enemy glow effect
-    ctx.shadowColor = enemy.color;
-    ctx.shadowBlur = 10;
+    // Boss special effects
+    if (enemy.isBoss) {
+      ctx.shadowColor = enemy.color;
+      ctx.shadowBlur = enemy.isMiniBoss ? 15 : 25;
+    } else {
+      ctx.shadowColor = enemy.color;
+      ctx.shadowBlur = 8;
+    }
     
     // Enemy body
     ctx.fillStyle = enemy.color;
@@ -999,19 +1079,37 @@ function render() {
     ctx.arc(enemy.x, enemy.y, enemy.size, 0, Math.PI * 2);
     ctx.fill();
     
-    // Enemy core (darker center)
+    // Enemy core
     ctx.shadowBlur = 0;
-    ctx.fillStyle = "#aa0000";
+    if (enemy.isBoss) {
+      ctx.fillStyle = enemy.isMiniBoss ? "#660044" : "#880000";
+    } else {
+      ctx.fillStyle = "#aa0000";
+    }
     ctx.beginPath();
     ctx.arc(enemy.x, enemy.y, enemy.size * 0.6, 0, Math.PI * 2);
     ctx.fill();
 
     // Enemy outline
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = enemy.isBoss ? "#ffff00" : "#ffffff";
+    ctx.lineWidth = enemy.isBoss ? 3 : 2;
     ctx.beginPath();
     ctx.arc(enemy.x, enemy.y, enemy.size, 0, Math.PI * 2);
     ctx.stroke();
+    
+    // Health bar for bosses and damaged enemies
+    if (enemy.isBoss || enemy.health < enemy.maxHealth) {
+      const barWidth = enemy.size * 2.5;
+      const barHeight = 5;
+      const barX = enemy.x - barWidth / 2;
+      const barY = enemy.y - enemy.size - 12;
+      
+      ctx.fillStyle = '#333';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+      
+      ctx.fillStyle = enemy.isBoss ? '#ff0000' : '#ff4444';
+      ctx.fillRect(barX, barY, barWidth * (enemy.health / enemy.maxHealth), barHeight);
+    }
     
     ctx.restore();
   });
