@@ -524,10 +524,10 @@ function spawnEnemies(deltaTime) {
 
     // Enemy types with different stats
     const enemyTypes = [
-      { size: 12, speed: 80, health: 15, damage: 8, color: "#ff8844", xp: 12 }, // Fast
-      { size: 15, speed: 60, health: 20, damage: 12, color: "#ff4444", xp: 15 }, // Normal
-      { size: 18, speed: 40, health: 30, damage: 15, color: "#8844ff", xp: 20 }, // Tank
-      { size: 14, speed: 70, health: 18, damage: 10, color: "#44ff88", xp: 18 }  // Shooter
+      { size: 12, speed: 80, health: 15, damage: 8, color: "#ff8844", xp: 20 }, // Fast
+      { size: 15, speed: 60, health: 20, damage: 12, color: "#ff4444", xp: 25 }, // Normal
+      { size: 18, speed: 40, health: 30, damage: 15, color: "#8844ff", xp: 35 }, // Tank
+      { size: 14, speed: 70, health: 18, damage: 10, color: "#44ff88", xp: 30 }  // Shooter
     ];
     
     const type = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
@@ -579,7 +579,7 @@ function spawnMiniBoss() {
     maxHealth: 80,
     damage: 20,
     color: "#ff0088",
-    xp: 80,
+    xp: 120,
     isBoss: true,
     isMiniBoss: true
   });
@@ -605,7 +605,7 @@ function spawnBoss() {
     maxHealth: 150,
     damage: 30,
     color: "#ff0000",
-    xp: 200,
+    xp: 300,
     isBoss: true,
     isMiniBoss: false
   });
@@ -855,6 +855,11 @@ function updateUI() {
     0,
     Math.floor(player.health)
   )}/${player.maxHealth}`;
+  
+  // Update XP bar
+  const xpPercentage = (player.experience / player.experienceToNext) * 100;
+  document.querySelector(".xp-fill").style.width = `${xpPercentage}%`;
+  document.querySelector(".xp-text").textContent = `${player.experience}/${player.experienceToNext}`;
 }
 
 // Game over
