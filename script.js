@@ -16,13 +16,20 @@ let gameState = {
 // Audio system
 const audioSystem = {
   soundEnabled: true,
+  lastSounds: {},
   
   init() {
     // Audio system initialized
   },
   
-  playSound(soundName) {
+  playSound(soundName, throttleMs = 50) {
     if (!this.soundEnabled) return;
+    
+    const now = Date.now();
+    if (this.lastSounds[soundName] && now - this.lastSounds[soundName] < throttleMs) {
+      return;
+    }
+    this.lastSounds[soundName] = now;
     
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     
@@ -77,21 +84,22 @@ const audioSystem = {
 
   
   createDestroySound(ctx) {
+    // Create a more pleasant "pop" sound
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
     
     oscillator.connect(gainNode);
     gainNode.connect(ctx.destination);
     
-    oscillator.frequency.setValueAtTime(300, ctx.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.4);
-    oscillator.type = 'sawtooth';
+    oscillator.frequency.setValueAtTime(600, ctx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.15);
+    oscillator.type = 'sine';
     
-    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
     
     oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.4);
+    oscillator.stop(ctx.currentTime + 0.15);
   }
 };
 
@@ -106,6 +114,10 @@ const player = {
   maxHealth: 100,
   experience: 0,
   experienceToNext: 100,
+  satellites: [],
+  xpMagnetRange: 0,
+  regen: 0,
+  lifeSteal: 0,
 };
 
 // Game objects arrays
@@ -126,6 +138,8 @@ const weapons = {
     cooldown: 800,
     lastFired: 0,
     level: 1,
+    multiShot: 1,
+    piercing: 0,
   },
 };
 
@@ -165,12 +179,70 @@ const upgrades = [
     },
   },
   {
-    name: "Projectile Speed",
-    description: "Projectiles move 30% faster",
+    name: "Multi-Shot",
+    description: "Fire 2 additional projectiles",
     effect: () => {
-      Object.keys(weapons).forEach((weapon) => {
-        weapons[weapon].speed *= 1.3;
+      weapons.fireball.multiShot = (weapons.fireball.multiShot || 1) + 2;
+    },
+  },
+  {
+    name: "Piercing Shots",
+    description: "Projectiles pierce through enemies",
+    effect: () => {
+      weapons.fireball.piercing = (weapons.fireball.piercing || 0) + 1;
+    },
+  },
+  {
+    name: "Satellite Defense",
+    description: "Add orbiting satellite that damages enemies",
+    effect: () => {
+      player.satellites.push({
+        x: player.x,
+        y: player.y,
+        angle: Math.random() * Math.PI * 2,
+        radius: 60 + player.satellites.length * 20,
+        speed: 2 + Math.random(),
+        size: 8,
+        damage: 15,
+        color: "#00ffff"
       });
+    },
+  },
+  {
+    name: "Missile Launcher",
+    description: "Unlock homing missiles",
+    effect: () => {
+      weapons.missile = weapons.missile || { damage: 40, speed: 200, cooldown: 1500, lastFired: 0, enabled: false };
+      weapons.missile.enabled = true;
+    },
+  },
+  {
+    name: "Laser Beam",
+    description: "Unlock rapid-fire laser",
+    effect: () => {
+      weapons.laser = weapons.laser || { damage: 15, speed: 500, cooldown: 300, lastFired: 0, enabled: false };
+      weapons.laser.enabled = true;
+    },
+  },
+  {
+    name: "XP Magnet",
+    description: "Attract XP orbs from a distance",
+    effect: () => {
+      player.xpMagnetRange = (player.xpMagnetRange || 0) + 80;
+    },
+  },
+  {
+    name: "Health Regeneration",
+    description: "Slowly regenerate health over time",
+    effect: () => {
+      player.regen = (player.regen || 0) + 5;
+    },
+  },
+  {
+    name: "Life Steal",
+    description: "Heal when dealing damage to enemies",
+    effect: () => {
+      player.lifeSteal = (player.lifeSteal || 0) + 0.15;
     },
   },
 ];
@@ -301,6 +373,11 @@ function update(deltaTime) {
 
   // Update player
   updatePlayer(deltaTime);
+  
+  // Apply regeneration
+  if (player.regen > 0) {
+    player.health = Math.min(player.maxHealth, player.health + player.regen * deltaTime);
+  }
 
   // Update weapons
   updateWeapons(deltaTime);
@@ -311,17 +388,42 @@ function update(deltaTime) {
   // Update projectiles
   updateProjectiles(deltaTime);
 
+  // Update satellites
+  updateSatellites(deltaTime);
+
   // Update XP orbs
   updateXPOrbs(deltaTime);
 
   // Update particles
   updateParticles(deltaTime);
+  
+
 
   // Spawn enemies
   spawnEnemies(deltaTime);
 
   // Check collisions
   checkCollisions();
+  
+  // Check enemy projectile collisions with player
+  projectiles.forEach((projectile, index) => {
+    if (projectile.type === 'enemy_projectile') {
+      const distance = Math.sqrt(
+        Math.pow(projectile.x - player.x, 2) + Math.pow(projectile.y - player.y, 2)
+      );
+      
+      if (distance < projectile.size + player.width / 2) {
+        player.health -= projectile.damage;
+        projectiles.splice(index, 1);
+        createParticles(player.x, player.y, "#ff4444", 5);
+        createScreenShake();
+        
+        if (player.health <= 0) {
+          gameOver();
+        }
+      }
+    }
+  });
 
   // Check if player should level up
   checkLevelUp();
@@ -387,18 +489,27 @@ function updateWeapons(deltaTime) {
         nearestEnemy.x - player.x
       );
 
-      // Create projectile
-      projectiles.push({
-        x: player.x,
-        y: player.y,
-        vx: Math.cos(angle) * weapons.fireball.speed,
-        vy: Math.sin(angle) * weapons.fireball.speed,
-        damage: weapons.fireball.damage,
-        size: 6,
-        life: 3,
-        color: "#ff6600",
-        trail: [],
-      });
+      // Create projectiles (multi-shot support)
+      const shots = weapons.fireball.multiShot || 1;
+      const spreadAngle = shots > 1 ? 0.3 : 0;
+      
+      for (let i = 0; i < shots; i++) {
+        const shotAngle = angle + (i - (shots - 1) / 2) * spreadAngle;
+        projectiles.push({
+          x: player.x,
+          y: player.y,
+          vx: Math.cos(shotAngle) * weapons.fireball.speed,
+          vy: Math.sin(shotAngle) * weapons.fireball.speed,
+          damage: weapons.fireball.damage,
+          size: 6,
+          life: 3,
+          color: "#ff6600",
+          trail: [],
+          piercing: weapons.fireball.piercing || 0,
+          piercedEnemies: 0,
+          type: 'fireball'
+        });
+      }
 
       // Play shoot sound
       audioSystem.playSound('shoot');
@@ -409,15 +520,114 @@ function updateWeapons(deltaTime) {
       weapons.fireball.lastFired = now;
     }
   }
+  
+  // Update other weapons
+  if (weapons.missile && weapons.missile.enabled && enemies.length > 0 && now - weapons.missile.lastFired > weapons.missile.cooldown) {
+    let nearestEnemy = null;
+    let nearestDistance = Infinity;
+    
+    enemies.forEach((enemy) => {
+      const distance = Math.sqrt(Math.pow(enemy.x - player.x, 2) + Math.pow(enemy.y - player.y, 2));
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestEnemy = enemy;
+      }
+    });
+    
+    if (nearestEnemy) {
+      projectiles.push({
+        x: player.x, y: player.y,
+        vx: 0, vy: 0,
+        damage: weapons.missile.damage,
+        size: 8, life: 5,
+        color: "#ff0000",
+        trail: [],
+        type: 'missile',
+        target: nearestEnemy,
+        speed: weapons.missile.speed
+      });
+    }
+    weapons.missile.lastFired = now;
+  }
+  
+  if (weapons.laser && weapons.laser.enabled && enemies.length > 0 && now - weapons.laser.lastFired > weapons.laser.cooldown) {
+    let nearestEnemy = null;
+    let nearestDistance = Infinity;
+    
+    enemies.forEach((enemy) => {
+      const distance = Math.sqrt(Math.pow(enemy.x - player.x, 2) + Math.pow(enemy.y - player.y, 2));
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestEnemy = enemy;
+      }
+    });
+    
+    if (nearestEnemy) {
+      const laserAngle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
+      projectiles.push({
+        x: player.x, y: player.y,
+        vx: Math.cos(laserAngle) * weapons.laser.speed,
+        vy: Math.sin(laserAngle) * weapons.laser.speed,
+        damage: weapons.laser.damage,
+        size: 3, life: 1,
+        color: "#00ffff",
+        trail: [],
+        type: 'laser'
+      });
+    }
+    weapons.laser.lastFired = now;
+  }
 }
 
 // Update enemies
 function updateEnemies(deltaTime) {
+  const now = Date.now();
+  
   enemies.forEach((enemy, index) => {
-    // Move towards player
-    const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-    enemy.x += Math.cos(angle) * enemy.speed * deltaTime;
-    enemy.y += Math.sin(angle) * enemy.speed * deltaTime;
+    // Mega boss behavior
+    if (enemy.isMegaBoss) {
+      // Shooting behavior
+      if (now - enemy.lastShot > enemy.shootCooldown) {
+        const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+        projectiles.push({
+          x: enemy.x,
+          y: enemy.y,
+          vx: Math.cos(angle) * 200,
+          vy: Math.sin(angle) * 200,
+          damage: 25,
+          size: 10,
+          life: 4,
+          color: "#ff00ff",
+          trail: [],
+          type: 'enemy_projectile'
+        });
+        enemy.lastShot = now;
+      }
+      
+      // Random movement behavior
+      enemy.moveTimer += deltaTime * 1000;
+      if (enemy.moveTimer > enemy.moveChangeInterval) {
+        enemy.moveDirection = Math.random() * Math.PI * 2;
+        enemy.moveTimer = 0;
+      }
+      
+      // Move in random direction
+      enemy.x += Math.cos(enemy.moveDirection) * enemy.speed * deltaTime;
+      enemy.y += Math.sin(enemy.moveDirection) * enemy.speed * deltaTime;
+      
+      // Keep mega boss in bounds
+      if (enemy.x < enemy.size || enemy.x > canvas.width - enemy.size) {
+        enemy.moveDirection = Math.PI - enemy.moveDirection;
+      }
+      if (enemy.y < enemy.size || enemy.y > canvas.height - enemy.size) {
+        enemy.moveDirection = -enemy.moveDirection;
+      }
+    } else {
+      // Normal enemy movement towards player
+      const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+      enemy.x += Math.cos(angle) * enemy.speed * deltaTime;
+      enemy.y += Math.sin(angle) * enemy.speed * deltaTime;
+    }
 
     // Check if enemy reached player
     const distance = Math.sqrt(
@@ -448,6 +658,31 @@ function updateEnemies(deltaTime) {
 // Update projectiles
 function updateProjectiles(deltaTime) {
   projectiles.forEach((projectile, index) => {
+    // Missile homing behavior - only target living enemies
+    if (projectile.type === 'missile' && projectile.target) {
+      // Check if target still exists
+      const targetExists = enemies.includes(projectile.target);
+      if (!targetExists) {
+        // Find new target
+        let nearestEnemy = null;
+        let nearestDistance = Infinity;
+        enemies.forEach((enemy) => {
+          const distance = Math.sqrt(Math.pow(enemy.x - projectile.x, 2) + Math.pow(enemy.y - projectile.y, 2));
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestEnemy = enemy;
+          }
+        });
+        projectile.target = nearestEnemy;
+      }
+      
+      if (projectile.target) {
+        const angle = Math.atan2(projectile.target.y - projectile.y, projectile.target.x - projectile.x);
+        projectile.vx = Math.cos(angle) * projectile.speed;
+        projectile.vy = Math.sin(angle) * projectile.speed;
+      }
+    }
+    
     // Add to trail
     projectile.trail.push({x: projectile.x, y: projectile.y, life: 0.2});
     if (projectile.trail.length > 5) projectile.trail.shift();
@@ -531,15 +766,16 @@ function spawnEnemies(deltaTime) {
     ];
     
     const type = enemyTypes[Math.floor(Math.random() * enemyTypes.length)];
+    const difficultyMultiplier = 1 + gameState.time * 0.02;
     
     enemies.push({
       x: x,
       y: y,
       size: type.size,
       speed: type.speed + Math.random() * 20 + gameState.time * 1.5,
-      health: type.health,
-      maxHealth: type.health,
-      damage: type.damage,
+      health: Math.floor(type.health * difficultyMultiplier),
+      maxHealth: Math.floor(type.health * difficultyMultiplier),
+      damage: Math.floor(type.damage * Math.min(difficultyMultiplier, 2)),
       color: type.color,
       xp: type.xp,
       isBoss: false
@@ -556,6 +792,12 @@ function spawnEnemies(deltaTime) {
   if (gameState.time > 0 && gameState.time % 120 === 0 && Math.random() < 0.8) {
     spawnBoss();
     console.log(`Boss spawned at ${gameState.time}s!`);
+  }
+  
+  // Spawn mega boss every 300 seconds
+  if (gameState.time > 0 && gameState.time % 300 === 0 && Math.random() < 0.9) {
+    spawnMegaBoss();
+    console.log(`Mega Boss spawned at ${gameState.time}s!`);
   }
 }
 
@@ -575,8 +817,8 @@ function spawnMiniBoss() {
     x: x, y: y,
     size: 25,
     speed: 35,
-    health: 80,
-    maxHealth: 80,
+    health: 150,
+    maxHealth: 150,
     damage: 20,
     color: "#ff0088",
     xp: 120,
@@ -601,13 +843,44 @@ function spawnBoss() {
     x: x, y: y,
     size: 35,
     speed: 25,
-    health: 150,
-    maxHealth: 150,
+    health: 300,
+    maxHealth: 300,
     damage: 30,
     color: "#ff0000",
     xp: 300,
     isBoss: true,
     isMiniBoss: false
+  });
+}
+
+// Spawn mega boss
+function spawnMegaBoss() {
+  const side = Math.floor(Math.random() * 4);
+  let x, y;
+
+  switch (side) {
+    case 0: x = Math.random() * canvas.width; y = -60; break;
+    case 1: x = canvas.width + 60; y = Math.random() * canvas.height; break;
+    case 2: x = Math.random() * canvas.width; y = canvas.height + 60; break;
+    case 3: x = -60; y = Math.random() * canvas.height; break;
+  }
+
+  enemies.push({
+    x: x, y: y,
+    size: 60,
+    speed: 20,
+    health: 800,
+    maxHealth: 800,
+    damage: 50,
+    color: "#8800ff",
+    xp: 800,
+    isBoss: true,
+    isMegaBoss: true,
+    lastShot: 0,
+    shootCooldown: 2000,
+    moveDirection: Math.random() * Math.PI * 2,
+    moveTimer: 0,
+    moveChangeInterval: 3000
   });
 }
 
@@ -624,6 +897,12 @@ function checkCollisions() {
       if (distance < projectile.size + enemy.size) {
         // Damage enemy
         enemy.health -= projectile.damage;
+        
+        // Apply life steal
+        if (player.lifeSteal > 0) {
+          const healAmount = projectile.damage * player.lifeSteal;
+          player.health = Math.min(player.maxHealth, player.health + healAmount);
+        }
 
         // Play hit sound
         audioSystem.playSound('hit');
@@ -632,16 +911,20 @@ function checkCollisions() {
         createParticles(enemy.x, enemy.y, "#ffaa00", 5);
         createImpactEffect(enemy.x, enemy.y);
 
-        // Remove projectile
-        projectiles.splice(pIndex, 1);
+        // Remove projectile if not piercing
+        if (!projectile.piercing || projectile.piercing <= (projectile.piercedEnemies || 0)) {
+          projectiles.splice(pIndex, 1);
+        } else {
+          projectile.piercedEnemies = (projectile.piercedEnemies || 0) + 1;
+        }
 
         // Remove enemy if dead
         if (enemy.health <= 0) {
           enemies.splice(eIndex, 1);
-          gameState.score += enemy.isBoss ? (enemy.isMiniBoss ? 50 : 100) : 10;
+          gameState.score += enemy.isBoss ? (enemy.isMiniBoss ? 50 : enemy.isMegaBoss ? 200 : 100) : 10;
 
-          // Play destroy sound
-          audioSystem.playSound('destroy');
+          // Play destroy sound with throttling
+          audioSystem.playSound('destroy', 100);
           
           // Drop XP orb
           createXPOrb(enemy.x, enemy.y, enemy.xp || 15);
@@ -892,6 +1175,10 @@ function restartGame() {
   player.speed = 200;
   player.experience = 0;
   player.experienceToNext = 100;
+  player.satellites = [];
+  player.xpMagnetRange = 0;
+  player.regen = 0;
+  player.lifeSteal = 0;
 
   // Reset weapons
   weapons.fireball.damage = 25;
@@ -1072,7 +1359,7 @@ function render() {
     // Boss special effects
     if (enemy.isBoss) {
       ctx.shadowColor = enemy.color;
-      ctx.shadowBlur = enemy.isMiniBoss ? 15 : 25;
+      ctx.shadowBlur = enemy.isMegaBoss ? 40 : (enemy.isMiniBoss ? 15 : 25);
     } else {
       ctx.shadowColor = enemy.color;
       ctx.shadowBlur = 8;
@@ -1087,7 +1374,13 @@ function render() {
     // Enemy core
     ctx.shadowBlur = 0;
     if (enemy.isBoss) {
-      ctx.fillStyle = enemy.isMiniBoss ? "#660044" : "#880000";
+      if (enemy.isMegaBoss) {
+        ctx.fillStyle = "#440088";
+      } else if (enemy.isMiniBoss) {
+        ctx.fillStyle = "#660044";
+      } else {
+        ctx.fillStyle = "#880000";
+      }
     } else {
       ctx.fillStyle = "#aa0000";
     }
@@ -1096,24 +1389,44 @@ function render() {
     ctx.fill();
 
     // Enemy outline
-    ctx.strokeStyle = enemy.isBoss ? "#ffff00" : "#ffffff";
-    ctx.lineWidth = enemy.isBoss ? 3 : 2;
+    ctx.strokeStyle = enemy.isBoss ? (enemy.isMegaBoss ? "#ff00ff" : "#ffff00") : "#ffffff";
+    ctx.lineWidth = enemy.isBoss ? (enemy.isMegaBoss ? 4 : 3) : 2;
     ctx.beginPath();
     ctx.arc(enemy.x, enemy.y, enemy.size, 0, Math.PI * 2);
     ctx.stroke();
     
+    // Mega boss additional effects
+    if (enemy.isMegaBoss) {
+      // Pulsing outer ring
+      ctx.strokeStyle = "#ff00ff";
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.5 + Math.sin(Date.now() * 0.005) * 0.3;
+      ctx.beginPath();
+      ctx.arc(enemy.x, enemy.y, enemy.size + 10, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    
     // Health bar for bosses and damaged enemies
     if (enemy.isBoss || enemy.health < enemy.maxHealth) {
-      const barWidth = enemy.size * 2.5;
-      const barHeight = 5;
+      const barWidth = enemy.size * (enemy.isMegaBoss ? 3 : 2.5);
+      const barHeight = enemy.isMegaBoss ? 8 : 5;
       const barX = enemy.x - barWidth / 2;
-      const barY = enemy.y - enemy.size - 12;
+      const barY = enemy.y - enemy.size - (enemy.isMegaBoss ? 20 : 12);
       
       ctx.fillStyle = '#333';
       ctx.fillRect(barX, barY, barWidth, barHeight);
       
-      ctx.fillStyle = enemy.isBoss ? '#ff0000' : '#ff4444';
+      ctx.fillStyle = enemy.isBoss ? (enemy.isMegaBoss ? '#8800ff' : '#ff0000') : '#ff4444';
       ctx.fillRect(barX, barY, barWidth * (enemy.health / enemy.maxHealth), barHeight);
+      
+      // Health text for mega boss
+      if (enemy.isMegaBoss) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Math.floor(enemy.health)}/${enemy.maxHealth}`, enemy.x, barY - 5);
+      }
     }
     
     ctx.restore();
@@ -1145,6 +1458,17 @@ function render() {
 
   // Draw player with enhanced visuals
   ctx.save();
+  
+  // Draw XP magnet range if active
+  if (player.xpMagnetRange > 0) {
+    ctx.globalAlpha = 0.1;
+    ctx.strokeStyle = "#00ff00";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.xpMagnetRange, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   
   // Player glow effect
   ctx.shadowColor = "#4CAF50";
@@ -1180,6 +1504,24 @@ function render() {
   );
   
   ctx.restore();
+
+  // Draw satellites
+  player.satellites.forEach((satellite) => {
+    ctx.save();
+    ctx.fillStyle = satellite.color;
+    ctx.shadowColor = satellite.color;
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.arc(satellite.x, satellite.y, satellite.size, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Draw satellite core
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(satellite.x, satellite.y, satellite.size * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
 
   // Draw XP orbs
   xpOrbs.forEach((orb) => {
@@ -1239,11 +1581,20 @@ function updateXPOrbs(deltaTime) {
   xpOrbs.forEach((orb, index) => {
     orb.life -= deltaTime;
     
-    // Check if player collected orb
+    // Check distance to player
     const distance = Math.sqrt(
       Math.pow(orb.x - player.x, 2) + Math.pow(orb.y - player.y, 2)
     );
     
+    // XP magnet behavior
+    if (player.xpMagnetRange > 0 && distance < player.xpMagnetRange) {
+      const angle = Math.atan2(player.y - orb.y, player.x - orb.x);
+      const magnetSpeed = 300;
+      orb.x += Math.cos(angle) * magnetSpeed * deltaTime;
+      orb.y += Math.sin(angle) * magnetSpeed * deltaTime;
+    }
+    
+    // Check if player collected orb
     if (distance < orb.size + player.width / 2) {
       player.experience += orb.xp;
       xpOrbs.splice(index, 1);
@@ -1256,6 +1607,39 @@ function updateXPOrbs(deltaTime) {
     if (orb.life <= 0) {
       xpOrbs.splice(index, 1);
     }
+  });
+}
+
+// Update satellites
+function updateSatellites(deltaTime) {
+  const now = Date.now();
+  
+  player.satellites.forEach((satellite, index) => {
+    // Orbit around player
+    satellite.angle += satellite.speed * deltaTime;
+    satellite.x = player.x + Math.cos(satellite.angle) * satellite.radius;
+    satellite.y = player.y + Math.sin(satellite.angle) * satellite.radius;
+    
+    // Check collision with enemies
+    enemies.forEach((enemy, enemyIndex) => {
+      const distance = Math.sqrt(
+        Math.pow(satellite.x - enemy.x, 2) + Math.pow(satellite.y - enemy.y, 2)
+      );
+      
+      if (distance < satellite.size + enemy.size) {
+        enemy.health -= satellite.damage;
+        createParticles(enemy.x, enemy.y, "#00ffff", 3);
+        
+        if (enemy.health <= 0) {
+          enemies.splice(enemyIndex, 1);
+          gameState.score += enemy.isBoss ? (enemy.isMiniBoss ? 50 : enemy.isMegaBoss ? 200 : 100) : 10;
+          createXPOrb(enemy.x, enemy.y, enemy.xp || 15);
+          audioSystem.playSound('destroy', 100);
+          createParticles(enemy.x, enemy.y, "#ff0000", enemy.isBoss ? 20 : 12);
+          createExplosion(enemy.x, enemy.y);
+        }
+      }
+    });
   });
 }
 
