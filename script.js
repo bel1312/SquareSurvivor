@@ -11,6 +11,7 @@ let gameState = {
   level: 1,
   time: 0,
   gameStartTime: 0,
+  lastUpdateTime: 0,
 };
 
 // Audio system
@@ -235,14 +236,14 @@ const upgrades = [
     name: "Health Regeneration",
     description: "Slowly regenerate health over time",
     effect: () => {
-      player.regen = (player.regen || 0) + 5;
+      player.regen = (player.regen || 0) + 1.5;
     },
   },
   {
     name: "Life Steal",
     description: "Heal when dealing damage to enemies",
     effect: () => {
-      player.lifeSteal = (player.lifeSteal || 0) + 0.15;
+      player.lifeSteal = (player.lifeSteal || 0) + 0.05;
     },
   },
 ];
@@ -276,7 +277,8 @@ function startGame() {
   gameState.running = true;
   gameState.inMenu = false;
   gameState.paused = false;
-  gameState.gameStartTime = Date.now();
+  gameState.gameStartTime = performance.now();
+  gameState.lastUpdateTime = performance.now();
 
   // Reset player
   player.x = canvas.width / 2;
@@ -353,7 +355,9 @@ function updateAudioStatus() {
 function gameLoop() {
   if (!gameState.running && !gameState.inMenu) return;
 
-  const deltaTime = 1 / 60; // 60 FPS
+  const now = performance.now();
+  const deltaTime = gameState.lastUpdateTime ? Math.min((now - gameState.lastUpdateTime) / 1000, 1/30) : 1/60;
+  gameState.lastUpdateTime = now;
 
   if (!gameState.inMenu) {
     update(deltaTime);
@@ -368,7 +372,7 @@ function update(deltaTime) {
   if (gameState.paused) return;
 
   // Update game time
-  gameState.time = Math.floor((Date.now() - gameState.gameStartTime) / 1000);
+  gameState.time = Math.floor((performance.now() - gameState.gameStartTime) / 1000);
   updateUI();
 
   // Update player
