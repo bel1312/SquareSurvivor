@@ -584,50 +584,28 @@ function updateEnemies(deltaTime) {
   const now = Date.now();
   
   enemies.forEach((enemy, index) => {
-    // Mega boss behavior
-    if (enemy.isMegaBoss) {
-      // Shooting behavior
-      if (now - enemy.lastShot > enemy.shootCooldown) {
-        const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-        projectiles.push({
-          x: enemy.x,
-          y: enemy.y,
-          vx: Math.cos(angle) * 200,
-          vy: Math.sin(angle) * 200,
-          damage: 25,
-          size: 10,
-          life: 4,
-          color: "#ff00ff",
-          trail: [],
-          type: 'enemy_projectile'
-        });
-        enemy.lastShot = now;
-      }
-      
-      // Random movement behavior
-      enemy.moveTimer += deltaTime * 1000;
-      if (enemy.moveTimer > enemy.moveChangeInterval) {
-        enemy.moveDirection = Math.random() * Math.PI * 2;
-        enemy.moveTimer = 0;
-      }
-      
-      // Move in random direction
-      enemy.x += Math.cos(enemy.moveDirection) * enemy.speed * deltaTime;
-      enemy.y += Math.sin(enemy.moveDirection) * enemy.speed * deltaTime;
-      
-      // Keep mega boss in bounds
-      if (enemy.x < enemy.size || enemy.x > canvas.width - enemy.size) {
-        enemy.moveDirection = Math.PI - enemy.moveDirection;
-      }
-      if (enemy.y < enemy.size || enemy.y > canvas.height - enemy.size) {
-        enemy.moveDirection = -enemy.moveDirection;
-      }
-    } else {
-      // Normal enemy movement towards player
+    // Mega boss shooting behavior
+    if (enemy.isMegaBoss && now - enemy.lastShot > enemy.shootCooldown) {
       const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-      enemy.x += Math.cos(angle) * enemy.speed * deltaTime;
-      enemy.y += Math.sin(angle) * enemy.speed * deltaTime;
+      projectiles.push({
+        x: enemy.x,
+        y: enemy.y,
+        vx: Math.cos(angle) * 200,
+        vy: Math.sin(angle) * 200,
+        damage: 25,
+        size: 10,
+        life: 4,
+        color: "#ff00ff",
+        trail: [],
+        type: 'enemy_projectile'
+      });
+      enemy.lastShot = now;
     }
+    
+    // Move towards player
+    const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+    enemy.x += Math.cos(angle) * enemy.speed * deltaTime;
+    enemy.y += Math.sin(angle) * enemy.speed * deltaTime;
 
     // Check if enemy reached player
     const distance = Math.sqrt(
@@ -877,10 +855,7 @@ function spawnMegaBoss() {
     isBoss: true,
     isMegaBoss: true,
     lastShot: 0,
-    shootCooldown: 2000,
-    moveDirection: Math.random() * Math.PI * 2,
-    moveTimer: 0,
-    moveChangeInterval: 3000
+    shootCooldown: 2000
   });
 }
 
